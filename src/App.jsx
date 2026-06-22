@@ -1,16 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
 
-/*
-  ===================================================================
-  설정 안내
-  ===================================================================
-  1. Firebase 콘솔(console.firebase.google.com)에서 새 프로젝트 생성
-  2. Firestore Database 활성화 (서울 리전, 테스트 모드로 시작)
-  3. 웹 앱(</>) 등록 후 나오는 firebaseConfig 값을 아래 FIREBASE_CONFIG에 붙여넣기
-  4. 선생님 대표 PIN을 ADMIN_PIN에 원하는 숫자로 설정 (기본값: 0000)
-  ===================================================================
-*/
-
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDtrC9EA9QuhScv5o7ffwXNIwwZH_dLnwg",
   authDomain: "alpha-score-db.firebaseapp.com",
@@ -40,6 +29,7 @@ const COMP_ITEMS = [
 const GRAMMAR_MAX = GRAMMAR_ITEMS.reduce((s, i) => s + i.max, 0);
 const COMP_MAX = COMP_ITEMS.reduce((s, i) => s + i.max, 0);
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
+const GRADES = ["초1", "초2", "초3", "초4", "초5", "초6", "중1", "중2", "중3"];
 
 let firebaseAppPromise = null;
 function loadFirebase() {
@@ -229,11 +219,11 @@ function MainApp({ fb, fbError, loading, students, scores, tab, setTab, toast, s
     [students]
   );
 
-  async function addStudent(name, cls) {
+  async function addStudent(name, cls, grade) {
     if (!fb) return;
     const id = genId();
     try {
-      await fb.setDoc(fb.doc(fb.db, "students", id), { name, class: cls });
+      await fb.setDoc(fb.doc(fb.db, "students", id), { name, class: cls, grade });
       showToast("학생이 추가되었습니다", true);
     } catch (e) {
       showToast("저장 실패: " + e.message, false);
@@ -480,7 +470,7 @@ function InputPanel({ students, classes, onSave }) {
             ) : (
               filteredStudents.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.name} {cls === "__all__" ? `(${s.class})` : ""}
+                  {s.name} {s.grade ? `· ${s.grade}` : ""} {cls === "__all__" ? `(${s.class})` : ""}
                 </option>
               ))
             )}
@@ -589,7 +579,7 @@ function ClassPanel({ students, scores, classes }) {
 
   function downloadCsv() {
     const header = [
-      "반", "이름", "연도", "월", "회차",
+      "반", "학년", "이름", "연도", "월", "회차",
       "Alpha Phonics(/10)", "Alpha Nuance(/4)", "Alpha Structure Q1(/6)", "Alpha Structure Q2(/6)",
       "Essay1-G(/9)", "Essay2-G(/10)", "Essay3-G(/17)", "Essay4-G(/9)", "Grammar 소계(/71)",
       "Essay1-C(/10)", "Essay2-C(/14)", "Essay3-C(/16)", "Composition 소계(/40)", "전체 총합(/111)",
@@ -611,7 +601,7 @@ function ClassPanel({ students, scores, classes }) {
         const gd = r.grammarDetail || {};
         const cd = r.compDetail || {};
         return [
-          s ? s.class : "", s ? s.name : "(삭제된 학생)", r.year, r.month, r.round,
+          s ? s.class : "", s ? s.grade || "" : "", s ? s.name : "(삭제된 학생)", r.year, r.month, r.round,
           gd.phonics ?? 0, gd.nuance ?? 0, gd.structureQ1 ?? 0, gd.structureQ2 ?? 0,
           gd.essay1 ?? 0, gd.essay2 ?? 0, gd.essay3 ?? 0, gd.essay4 ?? 0, r.grammar ?? 0,
           cd.essay1 ?? 0, cd.essay2 ?? 0, cd.essay3 ?? 0, r.comp ?? 0, r.total ?? 0,
@@ -674,7 +664,9 @@ function ClassPanel({ students, scores, classes }) {
               style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderBottom: "1px solid #efefec" }}
             >
               <div>
-                <p style={{ fontWeight: 500, fontSize: 14, margin: 0 }}>{s.name}</p>
+                <p style={{ fontWeight: 500, fontSize: 14, margin: 0 }}>
+                  {s.name} {s.grade && <span style={{ color: "#888", fontWeight: 400 }}>· {s.grade}</span>}
+                </p>
                 <p style={{ fontSize: 12, color: "#888", margin: "2px 0 0" }}>
                   {latest ? `${latest.year}년 ${latest.month}월 ${latest.round}` : "기록 없음"}
                 </p>
@@ -721,7 +713,7 @@ function TrendPanel({ students, scores }) {
         <select value={studentId} onChange={(e) => setStudentId(e.target.value)} style={{ ...selectStyle, maxWidth: 200 }}>
           {students.map((s) => (
             <option key={s.id} value={s.id}>
-              {s.name} ({s.class})
+              {s.name} ({s.class}{s.grade ? ` · ${s.grade}` : ""})
             </option>
           ))}
         </select>
@@ -791,6 +783,7 @@ function TrendPanel({ students, scores }) {
 function ManagePanel({ students, onAdd, onUpdate, onDelete }) {
   const [name, setName] = useState("");
   const [cls, setCls] = useState("");
+  const [grade, setGrade] = useState(GRADES[0]);
 
   const byClass = useMemo(() => {
     const map = {};
@@ -802,16 +795,23 @@ function ManagePanel({ students, onAdd, onUpdate, onDelete }) {
 
   function handleAdd() {
     if (!name.trim() || !cls.trim()) return;
-    onAdd(name.trim(), cls.trim());
+    onAdd(name.trim(), cls.trim(), grade);
     setName("");
     setCls("");
   }
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="학생 이름" style={{ ...selectStyle, flex: 1 }} />
-        <input value={cls} onChange={(e) => setCls(e.target.value)} placeholder="반 이름" style={{ ...selectStyle, flex: 1 }} />
+      <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="학생 이름" style={{ ...selectStyle, flex: 1, minWidth: 100 }} />
+        <select value={grade} onChange={(e) => setGrade(e.target.value)} style={{ ...selectStyle, width: 90 }}>
+          {GRADES.map((g) => (
+            <option key={g} value={g}>
+              {g}
+            </option>
+          ))}
+        </select>
+        <input value={cls} onChange={(e) => setCls(e.target.value)} placeholder="반 이름" style={{ ...selectStyle, flex: 1, minWidth: 100 }} />
         <button
           onClick={handleAdd}
           style={{ background: "#222", color: "white", border: "none", padding: "0 16px", borderRadius: 8, fontSize: 14, cursor: "pointer", whiteSpace: "nowrap" }}
@@ -829,20 +829,31 @@ function ManagePanel({ students, onAdd, onUpdate, onDelete }) {
             <div key={c} style={{ marginBottom: 16 }}>
               <p style={{ fontSize: 13, fontWeight: 500, color: "#888", margin: "0 0 6px" }}>{c}</p>
               {byClass[c].map((s) => (
-                <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #efefec" }}>
+                <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #efefec", gap: 4 }}>
                   <input
                     defaultValue={s.name}
                     onBlur={(e) => {
                       if (e.target.value.trim() && e.target.value !== s.name) onUpdate(s.id, "name", e.target.value.trim());
                     }}
-                    style={{ border: "none", background: "none", fontSize: 14, flex: 1, padding: 4 }}
+                    style={{ border: "none", background: "none", fontSize: 14, flex: 1, padding: 4, minWidth: 0 }}
                   />
+                  <select
+                    defaultValue={s.grade || GRADES[0]}
+                    onChange={(e) => onUpdate(s.id, "grade", e.target.value)}
+                    style={{ border: "none", background: "none", fontSize: 13, color: "#888", padding: 4 }}
+                  >
+                    {GRADES.map((g) => (
+                      <option key={g} value={g}>
+                        {g}
+                      </option>
+                    ))}
+                  </select>
                   <input
                     defaultValue={s.class}
                     onBlur={(e) => {
                       if (e.target.value.trim() && e.target.value !== s.class) onUpdate(s.id, "class", e.target.value.trim());
                     }}
-                    style={{ border: "none", background: "none", fontSize: 13, color: "#888", width: 100, padding: 4 }}
+                    style={{ border: "none", background: "none", fontSize: 13, color: "#888", width: 90, padding: 4 }}
                   />
                   <button
                     onClick={() => {
