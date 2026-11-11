@@ -11,23 +11,79 @@ const FIREBASE_CONFIG = {
 
 const ADMIN_PIN = "0000";
 
-const GRAMMAR_ITEMS = [
-  { key: "phonics", label: "Alpha Phonics", max: 10 },
-  { key: "nuance", label: "Alpha Nuance", max: 4 },
-  { key: "structureQ1", label: "Alpha Structure Q1", max: 6 },
-  { key: "structureQ2", label: "Alpha Structure Q2", max: 6 },
-  { key: "essay1", label: "Essay 1", max: 9 },
-  { key: "essay2", label: "Essay 2", max: 10 },
-  { key: "essay3", label: "Essay 3", max: 17 },
-  { key: "essay4", label: "Essay 4", max: 9 },
+/*
+  ===================================================================
+  회차별 시험지 구성 (문항 수 = 만점, 문항 1개 = 1점)
+  나중에 시험지가 바뀌면 아래 숫자(max)만 고치면 돼요.
+  ===================================================================
+*/
+const TESTS = {
+  "1차": {
+    grammar: [
+      { key: "phonics", label: "Alpha Phonics", max: 10 },
+      { key: "nuance", label: "Alpha Nuance", max: 4 },
+      { key: "structureQ1", label: "Alpha Structure Q1", max: 6 },
+      { key: "structureQ2", label: "Alpha Structure Q2", max: 6 },
+      { key: "essay1", label: "Essay 1", max: 9 },
+      { key: "essay2", label: "Essay 2", max: 10 },
+      { key: "essay3", label: "Essay 3", max: 17 },
+      { key: "essay4", label: "Essay 4", max: 9 },
+    ],
+    comp: [
+      { key: "essay1", label: "Essay 1", max: 10 },
+      { key: "essay2", label: "Essay 2", max: 14 },
+      { key: "essay3", label: "Essay 3", max: 16 },
+    ],
+  },
+  "2차": {
+    grammar: [
+      { key: "nuance", label: "Alpha Nuance", max: 8 },
+      { key: "structureQ1", label: "Alpha Structure Q1", max: 7 },
+      { key: "structureQ2", label: "Alpha Structure Q2", max: 6 },
+      { key: "essay1", label: "Essay 1", max: 9 },
+      { key: "essay2", label: "Essay 2", max: 10 },
+      { key: "essay3", label: "Essay 3", max: 17 },
+      { key: "essay4", label: "Essay 4", max: 9 },
+    ],
+    comp: [
+      { key: "essay1", label: "Essay 1", max: 20 },
+      { key: "essay2", label: "Essay 2", max: 20 },
+      { key: "essay3", label: "Essay 3", max: 20 },
+      { key: "essay4", label: "Essay 4", max: 20 },
+    ],
+  },
+};
+const ROUNDS = Object.keys(TESTS);
+
+function sumMax(items) {
+  return items.reduce((s, i) => s + i.max, 0);
+}
+
+function getTest(round) {
+  const t = TESTS[round] || TESTS["1차"];
+  const gMax = sumMax(t.grammar);
+  const cMax = sumMax(t.comp);
+  return { grammar: t.grammar, comp: t.comp, gMax, cMax, max: gMax + cMax };
+}
+
+// 엑셀 내보내기용: 1차·2차 항목을 모두 합친 열 목록
+const CSV_GRAMMAR = [
+  ["phonics", "Alpha Phonics"],
+  ["nuance", "Alpha Nuance"],
+  ["structureQ1", "Alpha Structure Q1"],
+  ["structureQ2", "Alpha Structure Q2"],
+  ["essay1", "Essay 1"],
+  ["essay2", "Essay 2"],
+  ["essay3", "Essay 3"],
+  ["essay4", "Essay 4"],
 ];
-const COMP_ITEMS = [
-  { key: "essay1", label: "Essay 1", max: 10 },
-  { key: "essay2", label: "Essay 2", max: 14 },
-  { key: "essay3", label: "Essay 3", max: 16 },
+const CSV_COMP = [
+  ["essay1", "Essay 1"],
+  ["essay2", "Essay 2"],
+  ["essay3", "Essay 3"],
+  ["essay4", "Essay 4"],
 ];
-const GRAMMAR_MAX = GRAMMAR_ITEMS.reduce((s, i) => s + i.max, 0);
-const COMP_MAX = COMP_ITEMS.reduce((s, i) => s + i.max, 0);
+
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 const GRADES = ["초1", "초2", "초3", "초4", "초5", "초6", "중1", "중2", "중3"];
 
@@ -68,8 +124,34 @@ function loadFirebase() {
     });
 
     return { db, collection, doc, getDocs, setDoc, deleteDoc, onSnapshot };
-  })();
+  })().catch((e) => {
+    firebaseAppPromise = null;
+    throw e;
+  });
   return firebaseAppPromise;
+}
+
+// 연결 오류를 선생님이 알아보기 쉬운 말로 바꿔서 보여줍니다
+function explainFirebaseError(e) {
+  const code = (e && e.code) || "";
+  const msg = (e && e.message) || String(e);
+  let hint = "";
+  if (code === "auth/operation-not-allowed" || code === "auth/admin-restricted-operation") {
+    hint = "익명 로그인이 꺼져 있어요. Firebase 콘솔 → Authentication → 로그인 방법(Sign-in method)에서 '익명'을 사용 설정하고 저장해 주세요.";
+  } else if (code === "auth/configuration-not-found") {
+    hint = "Firebase 콘솔 → Authentication에서 '시작하기' 버튼을 먼저 눌러 주세요.";
+  } else if (code === "auth/network-request-failed") {
+    hint = "인터넷 연결 문제이거나 네트워크가 막혀 있어요. 연결을 확인하고 새로고침해 주세요.";
+  } else if (code === "auth/invalid-api-key" || code === "auth/api-key-not-valid" || /api.?key/i.test(msg)) {
+    hint = "firebaseConfig의 apiKey 값이 올바른지 확인해 주세요.";
+  } else if (code === "auth/unauthorized-domain") {
+    hint = "Firebase 콘솔 → Authentication → 설정 → 승인된 도메인에 이 사이트 주소를 추가해 주세요.";
+  } else if (code === "permission-denied") {
+    hint = "Firestore 규칙이 접근을 막고 있어요. 규칙 탭에서 'allow read, write: if request.auth != null;' 로 게시했는지 확인해 주세요.";
+  } else {
+    hint = "아래 오류 코드를 Claude에게 알려주세요.";
+  }
+  return `Firebase 연결에 실패했어요. ${hint} (오류 코드: ${code || msg})`;
 }
 
 function genId() {
@@ -104,17 +186,23 @@ export default function App() {
         setFb(lib);
         const studentsCol = lib.collection(lib.db, "students");
         const scoresCol = lib.collection(lib.db, "scores");
-        unsubStudents = lib.onSnapshot(studentsCol, (snap) => {
-          setStudents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        });
-        unsubScores = lib.onSnapshot(scoresCol, (snap) => {
-          setScores(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        });
+        unsubStudents = lib.onSnapshot(
+          studentsCol,
+          (snap) => {
+            setStudents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+          },
+          (err) => setFbError(explainFirebaseError(err))
+        );
+        unsubScores = lib.onSnapshot(
+          scoresCol,
+          (snap) => {
+            setScores(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+          },
+          (err) => setFbError(explainFirebaseError(err))
+        );
         setLoading(false);
       } catch (e) {
-        setFbError(
-          "Firebase 연결에 실패했어요. firebaseConfig 값이 올바르게 입력되었는지 확인해주세요."
-        );
+        setFbError(explainFirebaseError(e));
         setLoading(false);
       }
     })();
@@ -301,6 +389,12 @@ function MainApp({ fb, fbError, loading, students, scores, tab, setTab, toast, s
     return (
       <div style={{ padding: "3rem 1.5rem", maxWidth: 480, margin: "0 auto", fontFamily: "sans-serif" }}>
         <p style={{ color: "#c0392b", fontSize: 14, lineHeight: 1.6 }}>{fbError}</p>
+        <button
+          onClick={() => window.location.reload()}
+          style={{ marginTop: 12, background: "#222", color: "white", border: "none", padding: "8px 16px", borderRadius: 8, fontSize: 14, cursor: "pointer" }}
+        >
+          다시 시도
+        </button>
       </div>
     );
   }
@@ -425,9 +519,11 @@ function InputPanel({ students, classes, onSave }) {
   const [studentId, setStudentId] = useState("");
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth() + 1);
-  const [round, setRound] = useState("1차");
+  const [round, setRound] = useState(ROUNDS[0]);
   const [grammar, setGrammar] = useState({});
   const [comp, setComp] = useState({});
+
+  const test = getTest(round);
 
   const filteredStudents = useMemo(
     () => (cls === "__all__" ? students : students.filter((s) => s.class === cls)),
@@ -442,23 +538,36 @@ function InputPanel({ students, classes, onSave }) {
     }
   }, [filteredStudents]);
 
-  const gSum = GRAMMAR_ITEMS.reduce((s, it) => s + (parseInt(grammar[it.key]) || 0), 0);
-  const cSum = COMP_ITEMS.reduce((s, it) => s + (parseInt(comp[it.key]) || 0), 0);
+  // 회차를 바꾸면 시험지가 달라지므로 입력칸을 비웁니다
+  useEffect(() => {
+    setGrammar({});
+    setComp({});
+  }, [round]);
+
+  const gSum = test.grammar.reduce((s, it) => s + (parseInt(grammar[it.key]) || 0), 0);
+  const cSum = test.comp.reduce((s, it) => s + (parseInt(comp[it.key]) || 0), 0);
 
   function handleSave() {
     if (!studentId) {
       return;
     }
+    const grammarDetail = {};
+    test.grammar.forEach((it) => {
+      grammarDetail[it.key] = parseInt(grammar[it.key]) || 0;
+    });
+    const compDetail = {};
+    test.comp.forEach((it) => {
+      compDetail[it.key] = parseInt(comp[it.key]) || 0;
+    });
     onSave({
       studentId,
       year: parseInt(year),
       month: parseInt(month),
       round,
-      grammarDetail: grammar,
-      compDetail: comp,
+      grammarDetail,
+      compDetail,
       grammar: gSum,
       comp: cSum,
-      total: gSum + cSum,
     });
     setGrammar({});
     setComp({});
@@ -494,7 +603,7 @@ function InputPanel({ students, classes, onSave }) {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 8 }}>
         <div>
           <label style={{ fontSize: 13, color: "#888", display: "block", marginBottom: 4 }}>연도</label>
           <input type="number" value={year} onChange={(e) => setYear(e.target.value)} style={selectStyle} />
@@ -512,19 +621,25 @@ function InputPanel({ students, classes, onSave }) {
         <div>
           <label style={{ fontSize: 13, color: "#888", display: "block", marginBottom: 4 }}>회차</label>
           <select value={round} onChange={(e) => setRound(e.target.value)} style={selectStyle}>
-            <option value="1차">1차</option>
-            <option value="2차">2차</option>
+            {ROUNDS.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
           </select>
         </div>
       </div>
+      <p style={{ fontSize: 12, color: "#888", margin: "0 0 20px" }}>
+        {round} 진단평가 · Grammar {test.gMax}점 / Composition {test.cMax}점
+      </p>
 
       <div style={{ background: "#993C1D", borderRadius: "10px 10px 0 0", padding: "10px 14px" }}>
         <span style={{ color: "#FAECE7", fontSize: 14, fontWeight: 500 }}>Grammar Assessment</span>
       </div>
       <div style={{ border: "1px solid #e5e5e3", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "0 1rem", marginBottom: 16 }}>
-        {GRAMMAR_ITEMS.map((it) => (
+        {test.grammar.map((it) => (
           <FieldRow
-            key={it.key}
+            key={round + "-g-" + it.key}
             label={it.label}
             max={it.max}
             value={grammar[it.key] ?? ""}
@@ -537,9 +652,9 @@ function InputPanel({ students, classes, onSave }) {
         <span style={{ color: "#E6F1FB", fontSize: 14, fontWeight: 500 }}>Composition Assessment</span>
       </div>
       <div style={{ border: "1px solid #e5e5e3", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "0 1rem", marginBottom: 16 }}>
-        {COMP_ITEMS.map((it) => (
+        {test.comp.map((it) => (
           <FieldRow
-            key={it.key}
+            key={round + "-c-" + it.key}
             label={it.label}
             max={it.max}
             value={comp[it.key] ?? ""}
@@ -548,10 +663,9 @@ function InputPanel({ students, classes, onSave }) {
         ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
-        <MetricCard label="Grammar 소계" value={`${gSum} / ${GRAMMAR_MAX}`} />
-        <MetricCard label="Composition 소계" value={`${cSum} / ${COMP_MAX}`} />
-        <MetricCard label="전체 총합" value={`${gSum + cSum} / ${GRAMMAR_MAX + COMP_MAX}`} />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+        <MetricCard label="Grammar 점수" value={`${gSum} / ${test.gMax}`} />
+        <MetricCard label="Composition 점수" value={`${cSum} / ${test.cMax}`} />
       </div>
 
       <button
@@ -596,9 +710,11 @@ function ClassPanel({ students, scores, classes }) {
   function downloadCsv() {
     const header = [
       "반", "학년", "이름", "연도", "월", "회차",
-      "Alpha Phonics(/10)", "Alpha Nuance(/4)", "Alpha Structure Q1(/6)", "Alpha Structure Q2(/6)",
-      "Essay1-G(/9)", "Essay2-G(/10)", "Essay3-G(/17)", "Essay4-G(/9)", "Grammar 소계(/71)",
-      "Essay1-C(/10)", "Essay2-C(/14)", "Essay3-C(/16)", "Composition 소계(/40)", "전체 총합(/111)",
+      ...CSV_GRAMMAR.map(([, label]) => `Grammar ${label}`),
+      "Grammar 소계",
+      ...CSV_COMP.map(([, label]) => `Composition ${label}`),
+      "Composition 소계",
+      "Grammar 만점", "Composition 만점",
     ];
     const rows = scores
       .slice()
@@ -614,13 +730,18 @@ function ClassPanel({ students, scores, classes }) {
       })
       .map((r) => {
         const s = students.find((st) => st.id === r.studentId);
+        const t = getTest(r.round);
+        const gKeys = new Set(t.grammar.map((i) => i.key));
+        const cKeys = new Set(t.comp.map((i) => i.key));
         const gd = r.grammarDetail || {};
         const cd = r.compDetail || {};
         return [
           s ? s.class : "", s ? s.grade || "" : "", s ? s.name : "(삭제된 학생)", r.year, r.month, r.round,
-          gd.phonics ?? 0, gd.nuance ?? 0, gd.structureQ1 ?? 0, gd.structureQ2 ?? 0,
-          gd.essay1 ?? 0, gd.essay2 ?? 0, gd.essay3 ?? 0, gd.essay4 ?? 0, r.grammar ?? 0,
-          cd.essay1 ?? 0, cd.essay2 ?? 0, cd.essay3 ?? 0, r.comp ?? 0, r.total ?? 0,
+          ...CSV_GRAMMAR.map(([key]) => (gKeys.has(key) ? gd[key] ?? 0 : "")),
+          r.grammar ?? 0,
+          ...CSV_COMP.map(([key]) => (cKeys.has(key) ? cd[key] ?? 0 : "")),
+          r.comp ?? 0,
+          t.gMax, t.cMax,
         ];
       });
     if (rows.length === 0) return;
@@ -674,6 +795,7 @@ function ClassPanel({ students, scores, classes }) {
             .filter((r) => r.studentId === s.id)
             .sort((a, b) => b.year - a.year || b.month - a.month || (b.round > a.round ? 1 : -1));
           const latest = studentScores[0];
+          const lt = latest ? getTest(latest.round) : null;
           return (
             <div
               key={s.id}
@@ -690,9 +812,15 @@ function ClassPanel({ students, scores, classes }) {
               <div style={{ textAlign: "right" }}>
                 {latest ? (
                   <>
-                    <span style={{ fontSize: 18, fontWeight: 500 }}>{latest.total}</span>
-                    <p style={{ fontSize: 11, color: "#888", margin: 0 }}>
-                      G {latest.grammar}/71 · C {latest.comp}/40
+                    <p style={{ fontSize: 14, margin: 0 }}>
+                      <span style={{ color: "#993C1D" }}>Grammar</span>{" "}
+                      <span style={{ fontWeight: 500 }}>{latest.grammar}</span>
+                      <span style={{ fontSize: 12, color: "#888" }}> / {lt.gMax}</span>
+                    </p>
+                    <p style={{ fontSize: 14, margin: "2px 0 0" }}>
+                      <span style={{ color: "#185FA5" }}>Composition</span>{" "}
+                      <span style={{ fontWeight: 500 }}>{latest.comp}</span>
+                      <span style={{ fontSize: 12, color: "#888" }}> / {lt.cMax}</span>
                     </p>
                   </>
                 ) : (
@@ -720,8 +848,6 @@ function TrendPanel({ students, scores }) {
     .filter((r) => r.studentId === studentId)
     .sort((a, b) => a.year - b.year || a.month - b.month || (a.round > b.round ? 1 : -1));
 
-  const maxTotal = GRAMMAR_MAX + COMP_MAX;
-
   return (
     <div>
       <div style={{ marginBottom: 16 }}>
@@ -739,32 +865,55 @@ function TrendPanel({ students, scores }) {
         <p style={{ fontSize: 14, color: "#888", padding: "2rem 0", textAlign: "center" }}>아직 기록된 점수가 없어요.</p>
       ) : (
         <>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 200, marginBottom: 24, borderBottom: "1px solid #e5e5e3", paddingBottom: 4 }}>
-            {studentScores.map((r, i) => (
-              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                <span style={{ fontSize: 11, color: "#888" }}>{r.total}</span>
-                <div
-                  style={{
-                    width: "100%",
-                    maxWidth: 32,
-                    background: "#185FA5",
-                    borderRadius: "4px 4px 0 0",
-                    height: `${(r.total / maxTotal) * 160}px`,
-                  }}
-                />
-                <span style={{ fontSize: 10, color: "#888", textAlign: "center" }}>
-                  {r.year}.{String(r.month).padStart(2, "0")}
-                  <br />
-                  {r.round}
-                </span>
-              </div>
-            ))}
+          <div style={{ display: "flex", gap: 16, marginBottom: 8, fontSize: 12, color: "#888" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 2, background: "#993C1D", display: "inline-block" }} />
+              Grammar
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 2, background: "#185FA5", display: "inline-block" }} />
+              Composition
+            </span>
           </div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 12, height: 210, marginBottom: 8, borderBottom: "1px solid #e5e5e3", paddingBottom: 4 }}>
+            {studentScores.map((r, i) => {
+              const t = getTest(r.round);
+              const gRatio = t.gMax ? r.grammar / t.gMax : 0;
+              const cRatio = t.cMax ? r.comp / t.cMax : 0;
+              return (
+                <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                  <div style={{ display: "flex", alignItems: "flex-end", gap: 4, width: "100%", justifyContent: "center" }}>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                      <span style={{ fontSize: 10, color: "#993C1D" }}>
+                        {r.grammar}/{t.gMax}
+                      </span>
+                      <div style={{ width: 22, background: "#993C1D", borderRadius: "4px 4px 0 0", height: `${Math.round(gRatio * 140)}px` }} />
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                      <span style={{ fontSize: 10, color: "#185FA5" }}>
+                        {r.comp}/{t.cMax}
+                      </span>
+                      <div style={{ width: 22, background: "#185FA5", borderRadius: "4px 4px 0 0", height: `${Math.round(cRatio * 140)}px` }} />
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 10, color: "#888", textAlign: "center" }}>
+                    {r.year}.{String(r.month).padStart(2, "0")}
+                    <br />
+                    {r.round}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <p style={{ fontSize: 11, color: "#aaa", margin: "0 0 24px" }}>
+            막대 높이는 각 영역 만점 대비 비율이에요 (1차·2차 만점이 달라서 비율로 비교해요).
+          </p>
 
           {studentScores
             .slice()
             .reverse()
             .map((r, i) => {
+              const t = getTest(r.round);
               const gd = r.grammarDetail || {};
               const cd = r.compDetail || {};
               return (
@@ -774,17 +923,17 @@ function TrendPanel({ students, scores }) {
                       {r.year}년 {r.month}월 · {r.round}
                     </span>
                     <span>
-                      G {r.grammar} / C {r.comp} = <strong style={{ fontWeight: 500 }}>{r.total}</strong>
+                      Grammar <strong style={{ fontWeight: 500 }}>{r.grammar}/{t.gMax}</strong> · Composition <strong style={{ fontWeight: 500 }}>{r.comp}/{t.cMax}</strong>
                     </span>
                   </summary>
                   <div style={{ fontSize: 12, color: "#888", padding: "8px 0 0 4px", lineHeight: 1.6 }}>
                     <p style={{ margin: "0 0 4px" }}>
                       <strong style={{ fontWeight: 500, color: "#222" }}>Grammar:</strong>{" "}
-                      {GRAMMAR_ITEMS.map((it) => `${it.label} ${gd[it.key] ?? 0}/${it.max}`).join(", ")}
+                      {t.grammar.map((it) => `${it.label} ${gd[it.key] ?? 0}/${it.max}`).join(", ")}
                     </p>
                     <p style={{ margin: 0 }}>
                       <strong style={{ fontWeight: 500, color: "#222" }}>Composition:</strong>{" "}
-                      {COMP_ITEMS.map((it) => `${it.label} ${cd[it.key] ?? 0}/${it.max}`).join(", ")}
+                      {t.comp.map((it) => `${it.label} ${cd[it.key] ?? 0}/${it.max}`).join(", ")}
                     </p>
                   </div>
                 </details>
